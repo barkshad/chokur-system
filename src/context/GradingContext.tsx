@@ -16,7 +16,15 @@ import {
   SubjectDepartmentalStat,
   ViewType,
 } from '../types';
-import { getGradeFromPoints, getGradeFromScore, KCSE_GRADING_TABLE, rankAllStudents } from '../utils/grading';
+import {
+  exportMarksTemplateCSV,
+  getGradeFromPoints,
+  getGradeFromScore,
+  KCSE_GRADING_TABLE,
+  parseMarksCSV,
+  ParsedCSVResult,
+  rankAllStudents,
+} from '../utils/grading';
 
 interface GradingContextType {
   activeView: ViewType;
@@ -34,6 +42,8 @@ interface GradingContextType {
   marks: Record<string, Record<string, MarkValue>>;
   updateMark: (studentId: string, subjectCode: string, value: MarkValue) => void;
   batchUpdateMarks: (updates: Array<{ studentId: string; subjectCode: string; value: MarkValue }>) => void;
+  importMarksFromCSV: (csvContent: string) => ParsedCSVResult;
+  downloadMarksTemplateCSV: () => void;
   addStudent: (student: Omit<Student, 'id'>) => void;
   updateStudent: (student: Student) => void;
   removeStudent: (studentId: string) => void;
@@ -143,6 +153,31 @@ export const GradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       });
       return next;
     });
+  };
+
+  const importMarksFromCSV = (csvContent: string): ParsedCSVResult => {
+    const result = parseMarksCSV(csvContent, students, subjects);
+    if (result.success && result.updates.length > 0) {
+      setMarks((prev) => {
+        const next = { ...prev };
+        result.updates.forEach((update) => {
+          next[update.studentId] = {
+            ...(next[update.studentId] || {}),
+            ...update.marks,
+          };
+        });
+        return next;
+      });
+    }
+    return result;
+  };
+
+  const downloadMarksTemplateCSV = () => {
+    exportMarksTemplateCSV(
+      filteredStudents,
+      subjects,
+      `KCSE_Marks_Template_${activeStream.replace(/\s+/g, '_')}`
+    );
   };
 
   const addStudent = (studentData: Omit<Student, 'id'>) => {
@@ -334,6 +369,8 @@ export const GradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
         marks,
         updateMark,
         batchUpdateMarks,
+        importMarksFromCSV,
+        downloadMarksTemplateCSV,
         addStudent,
         updateStudent,
         removeStudent,

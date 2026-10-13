@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { GradeChip } from '../components/GradeChip';
 import { useGrading } from '../context/GradingContext';
-import { KCSE_GRADING_TABLE } from '../utils/grading';
+import { KCSE_GRADING_TABLE, parseMarksCSV, ParsedCSVResult } from '../utils/grading';
 
 export const SettingsView: React.FC = () => {
   const {
@@ -10,6 +10,10 @@ export const SettingsView: React.FC = () => {
     exportJSONBackup,
     restoreJSONBackup,
     resetToDemoData,
+    importMarksFromCSV,
+    downloadMarksTemplateCSV,
+    students,
+    subjects,
   } = useGrading();
 
   const [formConfig, setFormConfig] = useState(schoolConfig);
@@ -18,6 +22,15 @@ export const SettingsView: React.FC = () => {
   const [isRestoreModalOpen, setIsRestoreModalOpen] = useState(false);
   const [restoreText, setRestoreText] = useState('');
   const [restoreError, setRestoreError] = useState(false);
+
+  // CSV Import State
+  const [csvInputText, setCsvInputText] = useState<string>('');
+  const [csvFileName, setCsvFileName] = useState<string>('');
+  const [csvMode, setCsvMode] = useState<'upload' | 'paste'>('upload');
+  const [parsedPreview, setParsedPreview] = useState<ParsedCSVResult | null>(null);
+  const [csvSuccessMessage, setCsvSuccessMessage] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleSave = () => {
     updateSchoolConfig(formConfig);
@@ -50,6 +63,77 @@ export const SettingsView: React.FC = () => {
     }
   };
 
+  // CSV Processing Handlers
+  const handleProcessFileContent = (content: string, name: string = 'uploaded_file.csv') => {
+    setCsvInputText(content);
+    setCsvFileName(name);
+    setCsvSuccessMessage(null);
+    const parsed = parseMarksCSV(content, students, subjects);
+    setParsedPreview(parsed);
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const text = event.target?.result as string;
+        handleProcessFileContent(text, file.name);
+      };
+      reader.readAsText(file, 'UTF-8');
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const text = event.target?.result as string;
+        handleProcessFileContent(text, file.name);
+      };
+      reader.readAsText(file, 'UTF-8');
+    }
+  };
+
+  const handlePasteChange = (text: string) => {
+    setCsvInputText(text);
+    setCsvFileName('Pasted CSV text');
+    setCsvSuccessMessage(null);
+    if (text.trim()) {
+      const parsed = parseMarksCSV(text, students, subjects);
+      setParsedPreview(parsed);
+    } else {
+      setParsedPreview(null);
+    }
+  };
+
+  const handleConfirmCSVImport = () => {
+    if (!csvInputText.trim()) return;
+    const result = importMarksFromCSV(csvInputText);
+    if (result.success) {
+      const studentCount = result.updates.length;
+      const subjectsCount = result.mappedSubjects.length;
+      setCsvSuccessMessage(
+        `Successfully imported marks for ${studentCount} students across ${subjectsCount} subjects into the central ledger!`
+      );
+      setParsedPreview(null);
+      setCsvInputText('');
+      setCsvFileName('');
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleClearCSV = () => {
+    setCsvInputText('');
+    setCsvFileName('');
+    setParsedPreview(null);
+    setCsvSuccessMessage(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
   return (
     <div className="max-w-[1200px] w-full mx-auto px-6 py-8 pb-32">
       {/* Page Title & Subtitle Header */}
@@ -60,7 +144,7 @@ export const SettingsView: React.FC = () => {
             <span className="font-tabular-sm text-tabular-sm text-[#5F5E5E]">CONFIG_ACAD_2026</span>
           </div>
           <p className="font-body-md text-body-md text-[#5F5E5E] mt-1">
-            Configure school metadata, grading scales, term calendar, and offline data sync
+            Configure school metadata, grading scales, bulk CSV marks import, and offline data sync
           </p>
         </div>
 
@@ -310,7 +394,279 @@ export const SettingsView: React.FC = () => {
           </div>
         </section>
 
-        {/* 4. Data & Backups Section */}
+        {/* 4. Bulk Marks Import (CSV) Section - NEW & REQUESTED */}
+        <section className="py-6 border-b border-[#DDD6C7] grid grid-cols-12 gap-6 bg-[#FBF8F1]/50 p-4 rounded my-2">
+          <div className="col-span-12 md:col-span-4 pr-4">
+            <div className="flex items-center gap-2">
+              <span className="material-symbols-outlined text-[#C2410C]">upload_file</span>
+              <h2 className="font-headline-sm text-headline-sm text-[#111111]">Bulk Marks Import (CSV)</h2>
+            </div>
+            <p className="font-caption text-caption text-[#5F5E5E] mt-1.5">
+              Bulk-upload student examination marks directly into the central ledger. Automatically matches
+              student admission numbers and KCSE subject codes (<code className="font-tabular-sm text-[#111111]">MAT, ENG, KIS, BIO, CHE, PHY, HIS, GEO, CRE, BST</code>).
+            </p>
+
+            {/* Template Download Button */}
+            <div className="mt-4 pt-3 border-t border-[#DDD6C7]">
+              <span className="font-label-caps text-label-caps text-[#5F5E5E] block mb-1">
+                CSV Template
+              </span>
+              <p className="font-caption text-caption text-[#5F5E5E] mb-2">
+                Download a pre-filled spreadsheet containing current student admission numbers and subject columns.
+              </p>
+              <button
+                type="button"
+                onClick={downloadMarksTemplateCSV}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-[#111111] bg-transparent text-[#111111] text-xs font-medium rounded hover:bg-[#F2EDE3] transition-colors cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-[16px]">file_download</span>
+                <span>Download Sample CSV Template</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="col-span-12 md:col-span-8 flex flex-col justify-start space-y-4">
+            {/* Mode Selector Tabs */}
+            <div className="flex items-center gap-3 border-b border-[#DDD6C7] pb-2 text-xs font-medium">
+              <button
+                type="button"
+                onClick={() => setCsvMode('upload')}
+                className={`flex items-center gap-1.5 pb-1 border-b-2 cursor-pointer ${
+                  csvMode === 'upload'
+                    ? 'border-[#C2410C] text-[#111111]'
+                    : 'border-transparent text-[#5F5E5E] hover:text-[#111111]'
+                }`}
+              >
+                <span className="material-symbols-outlined text-[15px]">cloud_upload</span>
+                <span>Upload CSV File</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setCsvMode('paste')}
+                className={`flex items-center gap-1.5 pb-1 border-b-2 cursor-pointer ${
+                  csvMode === 'paste'
+                    ? 'border-[#C2410C] text-[#111111]'
+                    : 'border-transparent text-[#5F5E5E] hover:text-[#111111]'
+                }`}
+              >
+                <span className="material-symbols-outlined text-[15px]">content_paste</span>
+                <span>Paste CSV / TSV Text</span>
+              </button>
+            </div>
+
+            {/* Success message banner */}
+            {csvSuccessMessage && (
+              <div className="p-3 bg-emerald-50 border border-emerald-300 rounded text-emerald-900 text-xs flex items-center justify-between animate-fadeIn">
+                <div className="flex items-center gap-2">
+                  <span className="material-symbols-outlined text-[18px] text-emerald-700">check_circle</span>
+                  <span className="font-medium">{csvSuccessMessage}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setCsvSuccessMessage(null)}
+                  className="text-emerald-700 hover:text-emerald-950 font-bold ml-2 cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+
+            {/* Mode 1: Drag & Drop File Upload */}
+            {csvMode === 'upload' && (
+              <div>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".csv,text/csv,text/plain"
+                  onChange={handleFileChange}
+                  className="hidden"
+                  id="csv-file-upload-input"
+                />
+                <div
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setIsDragging(true);
+                  }}
+                  onDragLeave={() => setIsDragging(false)}
+                  onDrop={handleDrop}
+                  onClick={() => fileInputRef.current?.click()}
+                  className={`border-2 border-dashed rounded p-6 text-center cursor-pointer transition-colors ${
+                    isDragging
+                      ? 'border-[#C2410C] bg-[#F2EDE3]'
+                      : 'border-[#DDD6C7] bg-[#FEF9EF] hover:bg-[#F2EDE3]/50'
+                  }`}
+                >
+                  <span className="material-symbols-outlined text-[32px] text-[#5F5E5E] mb-2 block">
+                    upload_file
+                  </span>
+                  <div className="font-body-md text-sm font-medium text-[#111111]">
+                    {csvFileName ? (
+                      <span className="text-[#C2410C] font-semibold">{csvFileName}</span>
+                    ) : (
+                      'Click to select a CSV file or drag and drop here'
+                    )}
+                  </div>
+                  <p className="font-caption text-xs text-[#5F5E5E] mt-1">
+                    Accepts standard comma-separated or tab-separated spreadsheet exports (.csv)
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Mode 2: Paste Raw CSV Text */}
+            {csvMode === 'paste' && (
+              <div>
+                <label className="block font-label-caps text-label-caps text-[#5F5E5E] uppercase mb-1">
+                  Paste Tabular Marks Data
+                </label>
+                <textarea
+                  rows={5}
+                  value={csvInputText}
+                  onChange={(e) => handlePasteChange(e.target.value)}
+                  placeholder={`AdmNo,StudentName,MAT,ENG,KIS,BIO,CHE,PHY,HIS,GEO,CRE,BST\n3842,Grace Achieng,85,80,88,76,72,74,82,78,90,75\n3819,Daniel Kiprop,90,70,72,82,78,84,68,74,80,86`}
+                  className="w-full bg-[#FEF9EF] border border-[#DDD6C7] rounded p-3 text-xs font-tabular-sm text-[#111111] focus:border-[#C2410C] focus:outline-none"
+                />
+              </div>
+            )}
+
+            {/* Inspection & Parse Preview Card */}
+            {parsedPreview && (
+              <div className="p-4 bg-[#FEF9EF] border border-[#DDD6C7] rounded space-y-3">
+                <div className="flex items-center justify-between pb-2 border-b border-[#DDD6C7]">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`w-2.5 h-2.5 rounded-full ${
+                        parsedPreview.success ? 'bg-emerald-600' : 'bg-red-600'
+                      }`}
+                    ></span>
+                    <span className="font-headline-sm text-xs font-semibold text-[#111111]">
+                      {parsedPreview.success ? 'File Parsed Successfully' : 'Parse Errors Encountered'}
+                    </span>
+                  </div>
+                  <span className="font-tabular-sm text-xs text-[#5F5E5E]">
+                    {parsedPreview.updates.length} students matched · {parsedPreview.mappedSubjects.length} subjects
+                  </span>
+                </div>
+
+                {/* Errors display */}
+                {parsedPreview.errors.length > 0 && (
+                  <div className="p-2.5 bg-red-50 border border-red-200 rounded text-red-900 text-xs">
+                    <div className="font-semibold mb-1">Validation Errors:</div>
+                    <ul className="list-disc list-inside space-y-0.5">
+                      {parsedPreview.errors.map((err, i) => (
+                        <li key={i}>{err}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Warnings display */}
+                {parsedPreview.warnings.length > 0 && (
+                  <div className="p-2.5 bg-amber-50 border border-amber-200 rounded text-amber-900 text-xs">
+                    <div className="font-semibold mb-1">Warnings:</div>
+                    <ul className="list-disc list-inside space-y-0.5">
+                      {parsedPreview.warnings.map((warn, i) => (
+                        <li key={i}>{warn}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Mapped Subjects Badges */}
+                {parsedPreview.mappedSubjects.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                    <span className="text-[#5F5E5E] font-label-caps text-[10px]">Mapped Subjects:</span>
+                    {parsedPreview.mappedSubjects.map((sub) => (
+                      <span
+                        key={sub}
+                        className="px-1.5 py-0.5 bg-[#F2EDE3] border border-[#DDD6C7] text-[#111111] font-tabular-sm text-[11px] rounded-[2px]"
+                      >
+                        {sub}
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                {/* Preview Table of first 5 records */}
+                {parsedPreview.updates.length > 0 && (
+                  <div>
+                    <div className="text-[11px] font-label-caps text-[#5F5E5E] uppercase mb-1">
+                      Data Sample Preview (First {Math.min(5, parsedPreview.updates.length)} Rows)
+                    </div>
+                    <div className="overflow-x-auto border border-[#DDD6C7] bg-[#FBF8F1]">
+                      <table className="w-full text-left border-collapse text-xs">
+                        <thead>
+                          <tr className="bg-[#FEF9EF] border-b border-[#DDD6C7] text-[10px] font-label-caps text-[#5F5E5E]">
+                            <th className="px-2 py-1.5">ADM</th>
+                            <th className="px-2 py-1.5">NAME</th>
+                            {parsedPreview.mappedSubjects.slice(0, 6).map((sub) => (
+                              <th key={sub} className="px-2 py-1.5 text-right">
+                                {sub}
+                              </th>
+                            ))}
+                            {parsedPreview.mappedSubjects.length > 6 && (
+                              <th className="px-2 py-1.5 text-right">+{parsedPreview.mappedSubjects.length - 6} more</th>
+                            )}
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-[#DDD6C7] font-tabular-sm">
+                          {parsedPreview.updates.slice(0, 5).map((u) => (
+                            <tr key={u.studentId} className="h-7 hover:bg-[#F2EDE3]">
+                              <td className="px-2 py-1 font-medium">{u.admNo}</td>
+                              <td className="px-2 py-1 text-[#111111]">{u.studentName}</td>
+                              {parsedPreview.mappedSubjects.slice(0, 6).map((sub) => (
+                                <td key={sub} className="px-2 py-1 text-right text-[#111111]">
+                                  {u.marks[sub] !== undefined ? String(u.marks[sub]) : '—'}
+                                </td>
+                              ))}
+                              {parsedPreview.mappedSubjects.length > 6 && (
+                                <td className="px-2 py-1 text-right text-[#5F5E5E]">...</td>
+                              )}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* Unmatched students note */}
+                {parsedPreview.unmatchedStudents.length > 0 && (
+                  <div className="text-xs text-[#5F5E5E]">
+                    <span className="text-amber-700 font-medium">
+                      {parsedPreview.unmatchedStudents.length} rows in CSV did not match active students
+                    </span>{' '}
+                    (e.g.{' '}
+                    {parsedPreview.unmatchedStudents.slice(0, 3).join(', ')}
+                    {parsedPreview.unmatchedStudents.length > 3 ? '...' : ''}).
+                  </div>
+                )}
+
+                {/* Action Buttons */}
+                <div className="pt-2 flex items-center justify-end gap-3 border-t border-[#DDD6C7]">
+                  <button
+                    type="button"
+                    onClick={handleClearCSV}
+                    className="px-3 py-1.5 text-xs text-[#5F5E5E] hover:text-[#111111] cursor-pointer"
+                  >
+                    Clear &amp; Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!parsedPreview.success || parsedPreview.updates.length === 0}
+                    onClick={handleConfirmCSVImport}
+                    className="px-4 py-1.5 bg-[#C2410C] text-[#FEF9EF] text-xs font-medium rounded hover:opacity-90 disabled:opacity-50 transition-opacity cursor-pointer flex items-center gap-1.5"
+                  >
+                    <span className="material-symbols-outlined text-[15px]">publish</span>
+                    <span>Commit Marks to Central Ledger ({parsedPreview.updates.length} Students)</span>
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </section>
+
+        {/* 5. Data & Backups Section */}
         <section className="py-6 border-b border-[#DDD6C7] grid grid-cols-12 gap-6">
           <div className="col-span-12 md:col-span-4 pr-4">
             <h2 className="font-headline-sm text-headline-sm text-[#111111]">Data &amp; Backups</h2>
@@ -353,7 +709,7 @@ export const SettingsView: React.FC = () => {
           </div>
         </section>
 
-        {/* 5. Offline Synchronization Section */}
+        {/* 6. Offline Synchronization Section */}
         <section className="py-6 grid grid-cols-12 gap-6">
           <div className="col-span-12 md:col-span-4 pr-4">
             <h2 className="font-headline-sm text-headline-sm text-[#111111]">Offline Synchronization</h2>
