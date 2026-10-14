@@ -37,23 +37,43 @@ export const OverviewView: React.FC = () => {
   };
 
   return (
-    <div className="max-w-[1200px] mx-auto px-6 py-8">
+    <div className="max-w-[1360px] mx-auto px-3 sm:px-6 py-4 sm:py-8 font-body-md text-[#111111]">
       {/* Page Header Area */}
-      <section className="flex flex-col md:flex-row md:items-end justify-between pb-6 border-b border-[#DDD6C7] gap-4">
+      <section className="flex flex-col md:flex-row md:items-end justify-between pb-4 sm:pb-6 border-b border-[#DDD6C7] gap-4">
         <div>
           <h1 className="font-headline-lg text-headline-lg text-[#111111] tracking-tight">Overview</h1>
-          <p className="font-body-md text-body-md text-[#5F5E5E] mt-1">
-            {activeStream} · {activeExam}
+          <p className="font-body-md text-xs sm:text-body-md text-[#5F5E5E] mt-1">
+            {activeStream} · {activeExam} · academic performance ledger
           </p>
         </div>
-        <div>
+
+        {/* Quick action buttons: Enter marks, View rankings, Print report cards */}
+        <div className="flex items-center gap-2 sm:gap-2.5 flex-wrap">
           <button
             onClick={() => setActiveView('marks-entry')}
             type="button"
-            className="bg-[#C2410C] text-[#FEF9EF] hover:opacity-95 rounded px-4 py-2 font-headline-sm text-[14px] flex items-center gap-2 transition-opacity cursor-pointer shadow-none"
+            className="flex-1 sm:flex-none bg-[#C2410C] text-[#FEF9EF] hover:opacity-95 rounded px-4 py-2 font-headline-sm text-xs sm:text-[13px] flex items-center justify-center gap-2 transition-opacity cursor-pointer shadow-none min-h-[44px]"
           >
-            <span className="material-symbols-outlined text-[18px]">edit_note</span>
+            <span className="material-symbols-outlined text-[17px]">edit_note</span>
             <span>Enter marks</span>
+          </button>
+
+          <button
+            onClick={() => setActiveView('rankings')}
+            type="button"
+            className="flex-1 sm:flex-none bg-transparent border border-[#111111] text-[#111111] hover:bg-[#F2EDE3] rounded px-3.5 py-2 font-body-sm text-xs sm:text-[13px] font-medium flex items-center justify-center gap-1.5 transition-colors cursor-pointer min-h-[44px]"
+          >
+            <span className="material-symbols-outlined text-[17px]">format_list_numbered</span>
+            <span>View rankings</span>
+          </button>
+
+          <button
+            onClick={() => setActiveView('report-cards')}
+            type="button"
+            className="w-full sm:w-auto bg-transparent border border-[#111111] text-[#111111] hover:bg-[#F2EDE3] rounded px-3.5 py-2 font-body-sm text-xs sm:text-[13px] font-medium flex items-center justify-center gap-1.5 transition-colors cursor-pointer min-h-[44px]"
+          >
+            <span className="material-symbols-outlined text-[17px]">badge</span>
+            <span>Print report cards</span>
           </button>
         </div>
       </section>
@@ -64,13 +84,13 @@ export const OverviewView: React.FC = () => {
         <div className="pr-6 pb-4 md:pb-0">
           <span className="block font-label-caps text-label-caps text-[#5F5E5E] mb-1">CLASS AVERAGE</span>
           <div className="font-display-stat text-display-stat text-[#111111] leading-none">
-            {classAverage > 0 ? classAverage.toFixed(1) : '58.4'}
+            {classAverage.toFixed(1)}%
           </div>
         </div>
 
         {/* Metric 2 */}
         <div className="px-0 md:px-6 pb-4 md:pb-0 border-l-0 md:border-l border-[#DDD6C7]">
-          <span className="block font-label-caps text-label-caps text-[#5F5E5E] mb-1">PASS RATE</span>
+          <span className="block font-label-caps text-label-caps text-[#5F5E5E] mb-1">UNIVERSITY PASS RATE</span>
           <div className="font-display-stat text-display-stat text-[#111111] leading-none">
             {passRate}%
           </div>
@@ -99,25 +119,34 @@ export const OverviewView: React.FC = () => {
         <div className="lg:col-span-7 space-y-8 lg:pr-8 lg:border-r lg:border-[#DDD6C7]">
           {/* Subjects at a glance */}
           <section>
-            <h2 className="font-headline-sm text-headline-sm text-[#111111] pb-3 border-b border-[#DDD6C7]">
-              Subjects at a glance
-            </h2>
+            <div className="flex items-center justify-between pb-3 border-b border-[#DDD6C7]">
+              <h2 className="font-headline-sm text-headline-sm text-[#111111]">
+                Subjects at a glance
+              </h2>
+              <button
+                onClick={() => setActiveView('subject-analysis')}
+                className="text-[#C2410C] text-xs font-semibold hover:underline inline-flex items-center gap-0.5 cursor-pointer bg-transparent border-none p-0"
+              >
+                <span>Full Subject Analysis</span>
+                <span className="material-symbols-outlined text-[13px]">arrow_forward</span>
+              </button>
+            </div>
             <div className="py-3.5 space-y-2 border-b border-[#DDD6C7]">
               <div className="flex items-baseline justify-between font-body-md text-body-md">
-                <span className="text-[#5F5E5E]">Strongest:</span>
+                <span className="text-[#5F5E5E]">Strongest Subject:</span>
                 <span className="text-[#111111] font-medium">
                   {strongestSubject?.name || 'Kiswahili'}, average{' '}
-                  <span className="font-tabular-md text-tabular-md">
-                    {strongestSubject?.average?.toFixed(1) || '67.2'}
+                  <span className="font-tabular-md text-tabular-md font-semibold">
+                    {strongestSubject?.average?.toFixed(1) || '0.0'}%
                   </span>
                 </span>
               </div>
               <div className="flex items-baseline justify-between font-body-md text-body-md">
-                <span className="text-[#5F5E5E]">Weakest:</span>
+                <span className="text-[#5F5E5E]">Weakest Subject:</span>
                 <span className="text-[#111111] font-medium">
                   {weakestSubject?.name || 'Chemistry'}, average{' '}
-                  <span className="font-tabular-md text-tabular-md">
-                    {weakestSubject?.average?.toFixed(1) || '43.5'}
+                  <span className="font-tabular-md text-tabular-md font-semibold text-[#C2410C]">
+                    {weakestSubject?.average?.toFixed(1) || '0.0'}%
                   </span>
                 </span>
               </div>
@@ -129,7 +158,7 @@ export const OverviewView: React.FC = () => {
             <div className="pb-3 border-b border-[#DDD6C7]">
               <h2 className="font-headline-sm text-headline-sm text-[#111111]">Near the line</h2>
               <p className="font-caption text-caption text-[#5F5E5E] mt-0.5">
-                Students within one point of the C+ cutoff (7.00 mean points benchmark)
+                Students within 1–2 points of the C+ university threshold (targeted academic intervention)
               </p>
             </div>
 
@@ -137,7 +166,7 @@ export const OverviewView: React.FC = () => {
             <div className="w-full overflow-x-auto">
               <table className="w-full text-left border-collapse">
                 <thead>
-                  <tr className="border-b border-[#DDD6C7]">
+                  <tr className="border-b border-[#DDD6C7] text-[11px]">
                     <th className="py-2.5 font-label-caps text-label-caps text-[#5F5E5E]">STUDENT</th>
                     <th className="py-2.5 font-label-caps text-label-caps text-[#5F5E5E] text-right">MEAN POINTS</th>
                     <th className="py-2.5 font-label-caps text-label-caps text-[#5F5E5E] text-right">AGGREGATE</th>
@@ -146,25 +175,25 @@ export const OverviewView: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#DDD6C7]">
-                  {nearTheLineStudents.slice(0, 4).map((record) => (
+                  {nearTheLineStudents.slice(0, 6).map((record) => (
                     <tr key={record.student.id} className="h-[44px] hover:bg-[#FBF8F1] transition-colors">
                       <td className="font-body-md text-body-md text-[#111111] font-medium">
                         {record.student.name}
                       </td>
                       <td className="font-tabular-md text-tabular-md text-[#111111] text-right font-medium">
-                        {record.meanPoints.toFixed(1)}
+                        {record.meanPoints.toFixed(2)}
                       </td>
                       <td className="font-tabular-md text-tabular-md text-[#111111] text-right">
                         {record.aggregate}/84
                       </td>
                       <td className="font-body-sm text-body-sm text-[#5F5E5E] pl-6">
                         {record.weakestSubject ? (
-                          <>
+                          <span className="bg-[#F8F3E9] px-2 py-0.5 rounded border border-[#DDD6C7] text-xs">
                             {record.weakestSubject.code}{' '}
-                            <span className="font-tabular-sm text-tabular-sm text-[#111111]">
+                            <span className="font-tabular-sm text-tabular-sm font-bold text-[#C2410C]">
                               {record.weakestSubject.score}
                             </span>
-                          </>
+                          </span>
                         ) : (
                           '—'
                         )}
@@ -193,9 +222,9 @@ export const OverviewView: React.FC = () => {
 
             {/* Benchmark rule note */}
             <div className="mt-4 pt-2 border-t border-[#DDD6C7] flex items-center justify-between text-[#5F5E5E] font-caption text-caption">
-              <span>C+ university entry threshold benchmark: 7.00 mean points</span>
+              <span>C+ university threshold benchmark: 6.50+ Mean Points</span>
               <span className="font-tabular-sm text-tabular-sm font-medium">
-                {nearTheLineStudents.length} candidates at risk
+                {nearTheLineStudents.length} candidates in threshold window
               </span>
             </div>
           </section>
@@ -206,8 +235,8 @@ export const OverviewView: React.FC = () => {
           {/* Top 5 Section */}
           <section>
             <div className="pb-3 border-b border-[#DDD6C7] flex items-baseline justify-between">
-              <h2 className="font-headline-sm text-headline-sm text-[#111111]">Top 5</h2>
-              <span className="font-label-caps text-label-caps text-[#5F5E5E]">TERM LEADERBOARD</span>
+              <h2 className="font-headline-sm text-headline-sm text-[#111111]">Top 5 Cohort Leaderboard</h2>
+              <span className="font-label-caps text-label-caps text-[#5F5E5E]">TERM STANDING</span>
             </div>
 
             {/* Rankings Ledger */}
@@ -217,18 +246,19 @@ export const OverviewView: React.FC = () => {
                   key={student.student.id}
                   className="h-[44px] flex items-center justify-between px-1 hover:bg-[#FBF8F1] transition-colors cursor-pointer"
                   onClick={() => handleViewCard(student.student.id)}
+                  title="Click to view report card"
                 >
                   <div className="flex items-center gap-4">
-                    <span className="font-tabular-md text-tabular-md text-[#5F5E5E] w-4 text-center">
+                    <span className="font-tabular-md text-tabular-md text-[#5F5E5E] w-4 text-center font-bold">
                       {student.rank}
                     </span>
-                    <span className="font-body-md text-body-md text-[#111111] font-medium">
+                    <span className="font-body-md text-body-md text-[#111111] font-medium hover:text-[#C2410C]">
                       {student.student.name}
                     </span>
                   </div>
                   <div className="flex items-center gap-4">
                     <span className="font-tabular-md text-tabular-md text-[#5F5E5E]">
-                      {student.aggregate}/84
+                      {student.aggregate}/84 pts
                     </span>
                     <GradeChip grade={student.meanGrade} />
                   </div>
@@ -255,7 +285,7 @@ export const OverviewView: React.FC = () => {
           {/* Aggregate Spread Mini-Ledger */}
           <section className="border-t border-[#DDD6C7] pt-6">
             <span className="block font-label-caps text-label-caps text-[#5F5E5E] mb-3">
-              AGGREGATE SPREAD
+              AGGREGATE PERFORMANCE TIERS
             </span>
             <div className="space-y-3">
               <div>
@@ -272,7 +302,7 @@ export const OverviewView: React.FC = () => {
 
               <div>
                 <div className="flex items-center text-caption justify-between mb-1.5 pt-1">
-                  <span className="text-[#5F5E5E] font-tabular-sm">Pass Tier (C+ to B)</span>
+                  <span className="text-[#5F5E5E] font-tabular-sm">Competent Pass Tier (C+ to B)</span>
                   <span className="font-tabular-md text-[#111111] font-semibold">
                     {passTierCount} students ({passTierPct}%)
                   </span>

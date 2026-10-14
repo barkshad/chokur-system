@@ -20,6 +20,7 @@ export const SettingsView: React.FC = () => {
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'synced'>('idle');
   const [isRestoreModalOpen, setIsRestoreModalOpen] = useState(false);
+  const [isResetModalOpen, setIsResetModalOpen] = useState(false);
   const [restoreText, setRestoreText] = useState('');
   const [restoreError, setRestoreError] = useState(false);
 
@@ -135,9 +136,9 @@ export const SettingsView: React.FC = () => {
   };
 
   return (
-    <div className="max-w-[1200px] w-full mx-auto px-6 py-8 pb-32">
+    <div className="max-w-[1360px] w-full mx-auto px-3 sm:px-6 py-4 sm:py-8 pb-32 font-body-md text-[#111111]">
       {/* Page Title & Subtitle Header */}
-      <div className="pb-6 mb-6 border-b border-[#DDD6C7] flex flex-col md:flex-row md:items-baseline justify-between gap-2">
+      <div className="pb-4 sm:pb-6 mb-4 sm:mb-6 border-b border-[#DDD6C7] flex flex-col md:flex-row md:items-baseline justify-between gap-2">
         <div>
           <div className="flex items-baseline gap-3">
             <h1 className="font-headline-lg text-headline-lg text-[#111111]">Settings</h1>
@@ -210,6 +211,31 @@ export const SettingsView: React.FC = () => {
                   type="text"
                   value={formConfig.contactPhoneEmail}
                   onChange={(e) => setFormConfig({ ...formConfig, contactPhoneEmail: e.target.value })}
+                  className="w-full bg-[#FBF8F1] border border-[#DDD6C7] rounded px-3 py-2 text-[#111111] font-body-md text-body-md focus:border-[#C2410C] focus:outline-none"
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block font-label-caps text-label-caps text-[#5F5E5E] uppercase mb-1.5">
+                  Principal Name
+                </label>
+                <input
+                  type="text"
+                  value={formConfig.principalName || ''}
+                  onChange={(e) => setFormConfig({ ...formConfig, principalName: e.target.value })}
+                  placeholder="e.g. Dr. E. Kibet (PhD)"
+                  className="w-full bg-[#FBF8F1] border border-[#DDD6C7] rounded px-3 py-2 text-[#111111] font-body-md text-body-md focus:border-[#C2410C] focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="block font-label-caps text-label-caps text-[#5F5E5E] uppercase mb-1.5">
+                  Head of Curriculum / Class Teacher
+                </label>
+                <input
+                  type="text"
+                  value={formConfig.classTeacher}
+                  onChange={(e) => setFormConfig({ ...formConfig, classTeacher: e.target.value })}
                   className="w-full bg-[#FBF8F1] border border-[#DDD6C7] rounded px-3 py-2 text-[#111111] font-body-md text-body-md focus:border-[#C2410C] focus:outline-none"
                 />
               </div>
@@ -692,11 +718,7 @@ export const SettingsView: React.FC = () => {
                 Restore from backup
               </button>
               <button
-                onClick={() => {
-                  if (confirm('Reset all marks, students, and configurations to demo records?')) {
-                    resetToDemoData();
-                  }
-                }}
+                onClick={() => setIsResetModalOpen(true)}
                 type="button"
                 className="border border-[#BA1A1A] bg-transparent text-[#BA1A1A] px-4 py-2 rounded font-body-sm text-body-sm font-medium hover:bg-[#FFDAD6]/30 transition-colors cursor-pointer"
               >
@@ -818,6 +840,45 @@ export const SettingsView: React.FC = () => {
                 className="px-4 py-1.5 bg-[#C2410C] text-[#FEF9EF] rounded text-sm font-medium hover:opacity-90 cursor-pointer"
               >
                 Restore Records
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reset Confirmation Modal */}
+      {isResetModalOpen && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+          <div className="bg-[#FEF9EF] border-2 border-red-700 rounded max-w-md w-full p-6 shadow-xl">
+            <div className="flex items-center gap-2 text-red-700 mb-2">
+              <span className="material-symbols-outlined text-[24px]">warning</span>
+              <h3 className="font-headline-sm text-headline-sm">Reset to Demo Cohort Data</h3>
+            </div>
+            <p className="font-body-sm text-body-sm text-[#111111] mb-3">
+              This will restore the ledger to clean Form 4 East seed records (42 students, KNEC 12-point marks, and official school config).
+            </p>
+            <div className="bg-red-50 border border-red-200 text-red-800 p-3 text-xs mb-4">
+              <strong>Notice:</strong> All custom student additions and newly entered marks will be overwritten with initial baseline data.
+            </div>
+            <div className="flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setIsResetModalOpen(false)}
+                className="px-4 py-1.5 text-sm text-[#5F5E5E] hover:text-[#111111] cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  await resetToDemoData();
+                  setIsResetModalOpen(false);
+                  setSaveSuccess(true);
+                  setTimeout(() => setSaveSuccess(false), 2500);
+                }}
+                className="px-4 py-1.5 bg-red-700 text-white rounded text-sm font-medium hover:bg-red-800 cursor-pointer"
+              >
+                Confirm Reset
               </button>
             </div>
           </div>

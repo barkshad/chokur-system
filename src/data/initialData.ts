@@ -1,4 +1,14 @@
-import { MarkValue, SchoolConfig, Student, Subject } from '../types';
+import {
+  ClassStream,
+  ExamPeriod,
+  MarkValue,
+  SchoolConfig,
+  Student,
+  Subject,
+  TeacherProfile,
+  TermConfig,
+  WhatsAppMessage,
+} from '../types';
 
 export const INITIAL_SCHOOL_CONFIG: SchoolConfig = {
   schoolName: 'Kabarak Demo Secondary School',
@@ -11,19 +21,39 @@ export const INITIAL_SCHOOL_CONFIG: SchoolConfig = {
   termClosingDate: '2026-08-08',
   calculationMethod: 'best7',
   classTeacher: 'Mr. J. Kiprotich',
+  principalName: 'Dr. E. Kibet (PhD)',
 };
 
+export const INITIAL_STREAMS: ClassStream[] = [
+  { id: 'str-1', name: 'Form 4 East', form: 'Form 4', stream: 'East', classTeacher: 'Mr. J. Kiprotich' },
+  { id: 'str-2', name: 'Form 4 West', form: 'Form 4', stream: 'West', classTeacher: 'Mrs. S. Chelangat' },
+  { id: 'str-3', name: 'Form 4 North', form: 'Form 4', stream: 'North', classTeacher: 'Mr. P. Wanyama' },
+  { id: 'str-4', name: 'Form 3 East', form: 'Form 3', stream: 'East', classTeacher: 'Ms. A. Muthoni' },
+];
+
+export const INITIAL_EXAMS: ExamPeriod[] = [
+  { id: 'exam-1', name: 'End-term Exam, Term 2 2026', term: 'Term 2', year: 2026, type: 'End-term' },
+  { id: 'exam-2', name: 'Mid-term Exam, Term 2 2026', term: 'Term 2', year: 2026, type: 'Mid-term' },
+  { id: 'exam-3', name: 'End-term Exam, Term 1 2026', term: 'Term 1', year: 2026, type: 'End-term' },
+];
+
+export const INITIAL_TERMS: TermConfig[] = [
+  { id: 'term-1', name: 'Term 1 2026', year: 2026, startDate: '2026-01-08', endDate: '2026-04-05' },
+  { id: 'term-2', name: 'Term 2 2026', year: 2026, startDate: '2026-05-05', endDate: '2026-08-08' },
+  { id: 'term-3', name: 'Term 3 2026', year: 2026, startDate: '2026-08-25', endDate: '2026-11-20' },
+];
+
 export const INITIAL_SUBJECTS: Subject[] = [
-  { id: 'sub-mat', code: 'MAT', name: 'Mathematics', department: 'Mathematics', entered: 42, lastExamMean: 54.7 },
-  { id: 'sub-eng', code: 'ENG', name: 'English', department: 'Languages', entered: 42, lastExamMean: 55.8 },
-  { id: 'sub-kis', code: 'KIS', name: 'Kiswahili', department: 'Languages', entered: 42, lastExamMean: 64.0 },
-  { id: 'sub-bio', code: 'BIO', name: 'Biology', department: 'Sciences', entered: 42, lastExamMean: 58.2 },
-  { id: 'sub-che', code: 'CHE', name: 'Chemistry', department: 'Sciences', entered: 42, lastExamMean: 45.3 },
-  { id: 'sub-phy', code: 'PHY', name: 'Physics', department: 'Sciences', entered: 42, lastExamMean: 49.5 },
-  { id: 'sub-his', code: 'HIS', name: 'History & Govt', department: 'Humanities', entered: 42, lastExamMean: 62.9 },
-  { id: 'sub-geo', code: 'GEO', name: 'Geography', department: 'Humanities', entered: 42, lastExamMean: 52.3 },
-  { id: 'sub-cre', code: 'CRE', name: 'CRE', department: 'Humanities', entered: 42, lastExamMean: 63.9 },
-  { id: 'sub-bst', code: 'BST', name: 'Business Studies', department: 'Applied Sciences', entered: 42, lastExamMean: 56.6 },
+  { id: 'sub-mat', code: 'MAT', name: 'Mathematics', department: 'Mathematics', entered: 42, lastExamMean: 54.7, teacher: 'Mr. J. Kiprotich' },
+  { id: 'sub-eng', code: 'ENG', name: 'English', department: 'Languages', entered: 42, lastExamMean: 55.8, teacher: 'Mrs. H. Otieno' },
+  { id: 'sub-kis', code: 'KIS', name: 'Kiswahili', department: 'Languages', entered: 42, lastExamMean: 64.0, teacher: 'Mr. B. Mwangi' },
+  { id: 'sub-bio', code: 'BIO', name: 'Biology', department: 'Sciences', entered: 42, lastExamMean: 58.2, teacher: 'Dr. C. Wambua' },
+  { id: 'sub-che', code: 'CHE', name: 'Chemistry', department: 'Sciences', entered: 42, lastExamMean: 45.3, teacher: 'Mr. T. Koech' },
+  { id: 'sub-phy', code: 'PHY', name: 'Physics', department: 'Sciences', entered: 42, lastExamMean: 49.5, teacher: 'Ms. F. Ndinda' },
+  { id: 'sub-his', code: 'HIS', name: 'History & Govt', department: 'Humanities', entered: 42, lastExamMean: 62.9, teacher: 'Mr. K. Omondi' },
+  { id: 'sub-geo', code: 'GEO', name: 'Geography', department: 'Humanities', entered: 42, lastExamMean: 52.3, teacher: 'Mrs. R. Chebet' },
+  { id: 'sub-cre', code: 'CRE', name: 'CRE', department: 'Humanities', entered: 42, lastExamMean: 63.9, teacher: 'Pastor J. Kariuki' },
+  { id: 'sub-bst', code: 'BST', name: 'Business Studies', department: 'Applied Sciences', entered: 42, lastExamMean: 56.6, teacher: 'Mr. L. Mutiso' },
 ];
 
 export const INITIAL_STUDENTS: Student[] = [
@@ -69,6 +99,11 @@ export const INITIAL_STUDENTS: Student[] = [
   { id: 's-40', admNo: '3915', name: 'Oscar Korir', stream: 'Form 4 East', gender: 'Male', kcpeMarks: 268, status: 'Active' },
   { id: 's-41', admNo: '3920', name: 'Rose Nduta', stream: 'Form 4 East', gender: 'Female', kcpeMarks: 260, status: 'Active' },
   { id: 's-42', admNo: '3924', name: 'Edwin Juma', stream: 'Form 4 East', gender: 'Male', kcpeMarks: 252, status: 'Active' },
+  // Form 4 West sample students
+  { id: 'sw-1', admNo: '3951', name: 'Alice Mutheu', stream: 'Form 4 West', gender: 'Female', kcpeMarks: 360, status: 'Active' },
+  { id: 'sw-2', admNo: '3952', name: 'Kiprono Cheruiyot', stream: 'Form 4 West', gender: 'Male', kcpeMarks: 345, status: 'Active' },
+  { id: 'sw-3', admNo: '3953', name: 'Vivian Cherono', stream: 'Form 4 West', gender: 'Female', kcpeMarks: 338, status: 'Active' },
+  { id: 'sw-4', admNo: '3954', name: 'Peter Karanja', stream: 'Form 4 West', gender: 'Male', kcpeMarks: 325, status: 'Active' },
 ];
 
 export const INITIAL_MARKS: Record<string, Record<string, MarkValue>> = {
@@ -156,4 +191,71 @@ export const INITIAL_MARKS: Record<string, Record<string, MarkValue>> = {
   's-41': { MAT: 32, ENG: 30, KIS: 35, BIO: 28, CHE: 18, PHY: 16, HIS: 37, GEO: 29, CRE: 39, BST: 27 },
   // s-42: Edwin Juma
   's-42': { MAT: 30, ENG: 28, KIS: 33, BIO: 26, CHE: 16, PHY: 14, HIS: 35, GEO: 27, CRE: 37, BST: 25 },
+  // Form 4 West marks
+  'sw-1': { MAT: 75, ENG: 70, KIS: 74, BIO: 65, CHE: 62, PHY: 68, HIS: 78, GEO: 72, CRE: 80, BST: 70 },
+  'sw-2': { MAT: 68, ENG: 65, KIS: 69, BIO: 58, CHE: 55, PHY: 60, HIS: 71, GEO: 64, CRE: 75, BST: 62 },
+  'sw-3': { MAT: 62, ENG: 60, KIS: 64, BIO: 54, CHE: 50, PHY: 52, HIS: 66, GEO: 58, CRE: 70, BST: 58 },
+  'sw-4': { MAT: 55, ENG: 52, KIS: 58, BIO: 48, CHE: 42, PHY: 44, HIS: 60, GEO: 52, CRE: 64, BST: 50 },
 };
+
+export const INITIAL_TEACHER_PROFILE: TeacherProfile = {
+  name: 'Mr. David Mutua',
+  tscNumber: 'TSC/489124/2012',
+  email: 'd.mutua@kabaraksec.ac.ke',
+  phone: '+254 722 345 678',
+  department: 'Mathematics & Physical Sciences',
+  assignedStream: 'Form 4 East',
+  subjectsTaught: ['Mathematics (MAT)', 'Physics (PHY)'],
+};
+
+export const INITIAL_WHATSAPP_MESSAGES: WhatsAppMessage[] = [
+  {
+    id: 'msg-1',
+    studentId: 's-1',
+    studentAdm: '4012',
+    studentName: 'Brian Kiprono',
+    parentName: 'Mr. Kiprono Sang',
+    parentPhone: '+254 712 111 222',
+    sender: 'teacher',
+    text: 'Good afternoon Mr. Sang. Brian has attained Grade A (81 pts) in the Form 4 East End-term exam, ranking #1 in class. Congratulations on his sterling effort!',
+    timestamp: '14:20',
+    status: 'read',
+  },
+  {
+    id: 'msg-2',
+    studentId: 's-1',
+    studentAdm: '4012',
+    studentName: 'Brian Kiprono',
+    parentName: 'Mr. Kiprono Sang',
+    parentPhone: '+254 712 111 222',
+    sender: 'parent',
+    text: 'Asante sana Mwalimu Mutua! We are delighted. We will continue encouraging him in Physics revision over the holiday.',
+    timestamp: '14:35',
+    status: 'read',
+  },
+  {
+    id: 'msg-3',
+    studentId: 's-2',
+    studentAdm: '4018',
+    studentName: 'Faith Chebet',
+    parentName: 'Mrs. Chebet Cheruiyot',
+    parentPhone: '+254 723 333 444',
+    sender: 'teacher',
+    text: 'Habari Mrs. Cheruiyot. Faith attained Grade A- (78 pts) ranking #2 overall. Her performance in Sciences is commendable.',
+    timestamp: '14:40',
+    status: 'delivered',
+  },
+  {
+    id: 'msg-4',
+    studentId: 's-12',
+    studentAdm: '4045',
+    studentName: 'Dennis Kipkemoi',
+    parentName: 'Mr. Kipkemoi Bett',
+    parentPhone: '+254 734 555 666',
+    sender: 'teacher',
+    text: 'Dear Mr. Bett, Dennis has achieved a C+ (53 pts). He is very close to a B- grade. We recommend 30 minutes extra daily practice on Chemistry organic equations.',
+    timestamp: '15:10',
+    status: 'delivered',
+  },
+];
+

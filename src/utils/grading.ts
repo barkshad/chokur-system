@@ -1,4 +1,16 @@
-import { GradeResult, KCSEGrade, MarkValue, Student, StudentCalculation, Subject } from '../types';
+/**
+ * KCSE 12-Point Grading & Ranking Pure Algorithms
+ * Official Kenya National Examinations Council (KNEC) Rules
+ */
+
+import {
+  GradeResult,
+  KCSEGrade,
+  MarkValue,
+  Student,
+  StudentCalculation,
+  Subject,
+} from '../types';
 
 export const KCSE_GRADING_TABLE: Array<{
   min: number;
@@ -22,6 +34,40 @@ export const KCSE_GRADING_TABLE: Array<{
   { min: 0, max: 29, grade: 'E', points: 1, tier: 'critical', description: 'Critical / Fail' },
 ];
 
+/**
+ * Validate and clean a mark input value.
+ * Accepts: numbers 0-100, 'ABS', or null/undefined.
+ * Rejects: letters other than ABS, negative numbers, >100.
+ */
+export function sanitizeMarkInput(input: any): MarkValue {
+  if (input === null || input === undefined || input === '') {
+    return null;
+  }
+  if (typeof input === 'string') {
+    const trimmed = input.trim().toUpperCase();
+    if (trimmed === 'ABS' || trimmed === 'ABSENT' || trimmed === 'A') {
+      return 'ABS';
+    }
+    if (trimmed === '' || trimmed === '-' || trimmed === '—') {
+      return null;
+    }
+    const num = Number(trimmed);
+    if (isNaN(num)) {
+      return null;
+    }
+    return Math.max(0, Math.min(100, Math.round(num)));
+  }
+  if (typeof input === 'number') {
+    if (isNaN(input)) return null;
+    return Math.max(0, Math.min(100, Math.round(input)));
+  }
+  return null;
+}
+
+/**
+ * Converts a subject score to KCSE Grade and Points.
+ * Null means not entered; 'ABS' means absent.
+ */
 export function getGradeFromScore(score: MarkValue): GradeResult {
   if (score === null || score === undefined) {
     return {
@@ -41,9 +87,11 @@ export function getGradeFromScore(score: MarkValue): GradeResult {
     };
   }
 
-  const num = Math.round(score);
+  const num = Math.round(Number(score));
+  const clamped = Math.max(0, Math.min(100, num));
+
   for (const item of KCSE_GRADING_TABLE) {
-    if (num >= item.min && num <= item.max) {
+    if (clamped >= item.min && clamped <= item.max) {
       return {
         grade: item.grade,
         points: item.points,
@@ -53,10 +101,12 @@ export function getGradeFromScore(score: MarkValue): GradeResult {
     }
   }
 
-  if (num > 100) return { grade: 'A', points: 12, tier: 'honors', description: 'Excellent' };
   return { grade: 'E', points: 1, tier: 'critical', description: 'Critical / Fail' };
 }
 
+/**
+ * Maps average points to KCSE letter grade according to KNEC rounded mean thresholds.
+ */
 export function getGradeFromPoints(points: number): KCSEGrade {
   if (points >= 11.5) return 'A';
   if (points >= 10.5) return 'A-';
@@ -72,6 +122,12 @@ export function getGradeFromPoints(points: number): KCSEGrade {
   return 'E';
 }
 
+/**
+ * Calculates academic standing for a single candidate.
+ * - Best 7 subjects points sum (max 84).
+ * - Fewer than 7 subjects marked as incomplete.
+ * - ABS excluded from average and point sum.
+ */
 export function calculateStudentStanding(
   student: Student,
   marks: Record<string, MarkValue>,
@@ -88,17 +144,19 @@ export function calculateStudentStanding(
     }
   });
 
+  const enteredSubjectsCount = numericScores.length;
+  const isIncomplete = enteredSubjectsCount < 7;
   const subjectsPassed = numericScores.filter((s) => s.score >= 50).length;
 
   let totalScore = 0;
   numericScores.forEach((s) => (totalScore += s.score));
-  const rawAverage = numericScores.length > 0 ? totalScore / numericScores.length : 0;
+  const rawAverage = enteredSubjectsCount > 0 ? totalScore / enteredSubjectsCount : 0;
 
-  // Find strongest and weakest subject
+  // Identify strongest and weakest subject
   let strongestSubject: { code: string; score: number } | undefined;
   let weakestSubject: { code: string; score: number } | undefined;
 
-  if (numericScores.length > 0) {
+  if (enteredSubjectsCount > 0) {
     const sortedByScore = [...numericScores].sort((a, b) => b.score - a.score);
     strongestSubject = { code: sortedByScore[0].code, score: sortedByScore[0].score };
     weakestSubject = {
@@ -111,20 +169,23 @@ export function calculateStudentStanding(
   let meanPoints = 0;
 
   if (calculationMethod === 'best7') {
-    // Sort descending by points
+    // Sort descending by points, take top 7
     const sortedByPoints = [...numericScores].sort((a, b) => b.points - a.points);
     const best7 = sortedByPoints.slice(0, 7);
     aggregate = best7.reduce((acc, curr) => acc + curr.points, 0);
-    meanPoints = best7.length > 0 ? aggregate / best7.length : 0;
+    // KNEC standard: divide by 7 (or entered count if fewer than 7)
+    meanPoints = aggregate / 7;
   } else {
-    // Simple straight points average
+    // Straight arithmetic mean of all entered subjects
     const totalPoints = numericScores.reduce((acc, curr) => acc + curr.points, 0);
     aggregate = totalPoints;
-    meanPoints = numericScores.length > 0 ? totalPoints / numericScores.length : 0;
+    meanPoints = enteredSubjectsCount > 0 ? totalPoints / enteredSubjectsCount : 0;
   }
 
-  const meanGrade = getGradeFromPoints(meanPoints);
-  const qualifies = meanPoints >= 6.5; // C+ benchmark is at 7 points (rounded benchmark >= 6.5)
+  const roundedMeanPoints = Math.round(meanPoints * 100) / 100;
+  const meanGrade = getGradeFromPoints(roundedMeanPoints);
+  // University qualification requires Grade C+ and above (benchmark 6.5+ mean points, max 12)
+  const qualifies = !isIncomplete && roundedMeanPoints >= 6.5;
 
   return {
     student,
@@ -132,15 +193,22 @@ export function calculateStudentStanding(
     average: Math.round(rawAverage * 10) / 10,
     aggregate,
     meanGrade,
-    meanPoints: Math.round(meanPoints * 100) / 100,
-    rank: 0, // Assigned later in batch ranking
+    meanPoints: roundedMeanPoints,
+    rank: 0, // Assigned during cohort ranking
     subjectsPassed,
+    enteredSubjectsCount,
+    isIncomplete,
     strongestSubject,
     weakestSubject,
     qualifies,
   };
 }
 
+/**
+ * Standard competition ranking (1, 2, 2, 4)
+ * Sorts by aggregate DESC, then average DESC, then name ASC.
+ * Ties share the exact same rank; subsequent rank skips accordingly.
+ */
 export function rankAllStudents(
   students: Student[],
   allMarks: Record<string, Record<string, MarkValue>>,
@@ -152,34 +220,64 @@ export function rankAllStudents(
     return calculateStudentStanding(student, studentMarks, subjects, calculationMethod);
   });
 
-  // Sort by aggregate (descending), then average (descending)
+  // Sort by aggregate (desc), then average (desc), then name (asc)
   calculations.sort((a, b) => {
     if (b.aggregate !== a.aggregate) {
       return b.aggregate - a.aggregate;
     }
-    return b.average - a.average;
+    if (b.average !== a.average) {
+      return b.average - a.average;
+    }
+    return a.student.name.localeCompare(b.student.name);
   });
 
-  // Assign ranks
-  calculations.forEach((calc, index) => {
-    calc.rank = index + 1;
+  // Assign standard competition ranks (1, 2, 2, 4)
+  let currentRank = 1;
+  calculations.forEach((calc, idx) => {
+    if (idx > 0) {
+      const prev = calculations[idx - 1];
+      if (prev.aggregate === calc.aggregate && prev.average === calc.average) {
+        calc.rank = prev.rank;
+      } else {
+        calc.rank = idx + 1;
+      }
+    } else {
+      calc.rank = 1;
+    }
+    currentRank = calc.rank;
   });
 
   return calculations;
 }
 
-export function exportTableToCSV(filename: string, headers: string[], rows: (string | number)[][]) {
-  const csvContent = [
-    headers.map((h) => `"${h.replace(/"/g, '""')}"`).join(','),
-    ...rows.map((row) =>
-      row
-        .map((cell) => {
-          const str = String(cell ?? '');
-          return `"${str.replace(/"/g, '""')}"`;
-        })
-        .join(',')
-    ),
-  ].join('\r\n');
+/**
+ * Neutralize formula injection characters (=, +, -, @) to prevent CSV injection vulnerability
+ */
+export function sanitizeCSVCell(value: string | number | null | undefined): string {
+  if (value === null || value === undefined) return '';
+  let str = String(value);
+  // If first character is formula trigger, prefix with a single apostrophe
+  if (/^[=+\-@\t\r]/.test(str)) {
+    str = `'${str}`;
+  }
+  return `"${str.replace(/"/g, '""')}"`;
+}
+
+/**
+ * Export tabular data to CSV with UTF-8 BOM for Microsoft Excel compatibility
+ */
+export function exportTableToCSV(
+  filename: string,
+  headers: string[],
+  rows: (string | number | null | undefined)[][]
+) {
+  const BOM = '\uFEFF';
+  const csvContent =
+    BOM +
+    [
+      headers.map(sanitizeCSVCell).join(','),
+      ...rows.map((row) => row.map(sanitizeCSVCell).join(',')),
+    ].join('\r\n');
 
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
@@ -202,7 +300,6 @@ export interface ParsedCSVResult {
   errors: string[];
 }
 
-// Split CSV line respecting quotation marks
 function parseCSVLine(line: string, delimiter: string = ','): string[] {
   const result: string[] = [];
   let current = '';
@@ -228,6 +325,10 @@ function parseCSVLine(line: string, delimiter: string = ','): string[] {
   return result;
 }
 
+/**
+ * Robust CSV parser for marks upload
+ * Handles BOM, CRLF, quoted commas, tab delimiters, and formula injection neutralisation
+ */
 export function parseMarksCSV(
   csvContent: string,
   students: Student[],
@@ -236,7 +337,10 @@ export function parseMarksCSV(
   const errors: string[] = [];
   const warnings: string[] = [];
 
-  const rawLines = csvContent.split(/\r?\n/).filter((l) => l.trim().length > 0);
+  // Strip BOM if present
+  const cleanContent = csvContent.replace(/^\uFEFF/, '');
+  const rawLines = cleanContent.split(/\r?\n/).filter((l) => l.trim().length > 0);
+
   if (rawLines.length < 2) {
     return {
       success: false,
@@ -245,11 +349,11 @@ export function parseMarksCSV(
       unmatchedStudents: [],
       totalRows: 0,
       warnings,
-      errors: ['The uploaded CSV file is empty or does not contain header and data rows.'],
+      errors: ['The CSV file is empty or missing headers and data rows.'],
     };
   }
 
-  // Detect delimiter: comma, tab, or semicolon
+  // Detect delimiter
   const firstLine = rawLines[0];
   let delimiter = ',';
   if (firstLine.includes('\t')) {
@@ -260,7 +364,6 @@ export function parseMarksCSV(
 
   const headerCells = parseCSVLine(firstLine, delimiter).map((h) => h.trim());
 
-  // Identify column indices
   let admColIdx = -1;
   let nameColIdx = -1;
   const subjectColMap: Array<{ colIdx: number; subjectCode: string }> = [];
@@ -268,21 +371,19 @@ export function parseMarksCSV(
   headerCells.forEach((header, idx) => {
     const normalized = header.toLowerCase().replace(/[^a-z0-9]/g, '');
 
-    // Check for admission column
     if (
       normalized === 'adm' ||
       normalized === 'admno' ||
       normalized === 'admission' ||
       normalized === 'admissionno' ||
       normalized === 'admnumber' ||
-      normalized === 'studentid' ||
-      normalized === 'regno'
+      normalized === 'regno' ||
+      normalized === 'studentid'
     ) {
       admColIdx = idx;
       return;
     }
 
-    // Check for student name column
     if (
       normalized === 'name' ||
       normalized === 'studentname' ||
@@ -293,7 +394,6 @@ export function parseMarksCSV(
       return;
     }
 
-    // Match subject code or subject name
     const matchedSubject = subjects.find(
       (s) =>
         s.code.toLowerCase() === header.toLowerCase().trim() ||
@@ -305,19 +405,17 @@ export function parseMarksCSV(
     }
   });
 
-  // Fallback if no explicit AdmNo column identified
   if (admColIdx === -1) {
-    // If first column isn't mapped to a subject, assume it is AdmNo
     if (headerCells.length > 0 && !subjectColMap.some((m) => m.colIdx === 0)) {
       admColIdx = 0;
-      warnings.push(`No "AdmNo" column header found. Assuming first column ("${headerCells[0]}") contains Admission Numbers.`);
+      warnings.push(`Assuming first column ("${headerCells[0]}") contains Admission Numbers.`);
     } else {
-      errors.push('Could not detect an Admission Number column (e.g. "AdmNo", "Admission", "ADM").');
+      errors.push('Could not detect an Admission Number column ("AdmNo", "Admission", etc.).');
     }
   }
 
   if (subjectColMap.length === 0) {
-    errors.push('No recognized KCSE subject columns found (e.g. MAT, ENG, KIS, BIO, CHE, PHY, HIS, GEO, CRE, BST).');
+    errors.push('No recognized KCSE subjects detected in headers (e.g. MAT, ENG, KIS, BIO, CHE).');
   }
 
   if (errors.length > 0) {
@@ -335,7 +433,6 @@ export function parseMarksCSV(
   const updates: Array<{ studentId: string; studentName: string; admNo: string; marks: Record<string, MarkValue> }> = [];
   const unmatchedStudents: string[] = [];
 
-  // Parse data rows
   for (let r = 1; r < rawLines.length; r++) {
     const rowCells = parseCSVLine(rawLines[r], delimiter);
     if (rowCells.length === 0 || rowCells.every((c) => c === '')) continue;
@@ -345,7 +442,6 @@ export function parseMarksCSV(
 
     if (!admVal && !nameVal) continue;
 
-    // Locate student in store
     const matchedStudent = students.find((s) => {
       if (admVal && s.admNo.toLowerCase() === admVal.toLowerCase()) return true;
       if (nameVal && s.name.toLowerCase() === nameVal.toLowerCase()) return true;
@@ -361,15 +457,15 @@ export function parseMarksCSV(
 
     subjectColMap.forEach(({ colIdx, subjectCode }) => {
       if (colIdx < rowCells.length) {
-        const cellRaw = rowCells[colIdx].trim();
-        const upper = cellRaw.toUpperCase();
+        const rawCell = rowCells[colIdx].trim();
+        const upper = rawCell.toUpperCase();
 
-        if (upper === 'ABS' || upper === 'A' || upper === 'ABSENT') {
+        if (upper === 'ABS' || upper === 'ABSENT' || upper === 'A') {
           studentMarks[subjectCode] = 'ABS';
-        } else if (cellRaw === '' || cellRaw === '-' || cellRaw === '—') {
-          // do not overwrite if blank, or set null
+        } else if (rawCell === '' || rawCell === '-' || rawCell === '—') {
+          // Leave null or blank
         } else {
-          const num = parseFloat(cellRaw);
+          const num = Number(rawCell);
           if (!isNaN(num)) {
             studentMarks[subjectCode] = Math.max(0, Math.min(100, Math.round(num)));
           }
@@ -401,4 +497,3 @@ export function exportMarksTemplateCSV(students: Student[], subjects: Subject[],
   const rows = students.map((s) => [s.admNo, s.name, ...subjects.map(() => '')]);
   exportTableToCSV(filename, headers, rows);
 }
-

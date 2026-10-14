@@ -1,11 +1,26 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  INITIAL_EXAMS,
   INITIAL_MARKS,
   INITIAL_SCHOOL_CONFIG,
+  INITIAL_STREAMS,
   INITIAL_STUDENTS,
   INITIAL_SUBJECTS,
+  INITIAL_TEACHER_PROFILE,
+  INITIAL_TERMS,
+  INITIAL_WHATSAPP_MESSAGES,
 } from '../data/initialData';
 import {
+  AppStateData,
+  loadSynchronousStorageState,
+  openDatabase,
+  persistAppState,
+  resetDatabaseToDefaults,
+  retrieveAppState,
+} from '../lib/db';
+import {
+  ClassStream,
+  ExamPeriod,
   GradeDistributionTier,
   KCSEGrade,
   MarkValue,
@@ -14,7 +29,10 @@ import {
   StudentCalculation,
   Subject,
   SubjectDepartmentalStat,
+  TeacherProfile,
+  TermConfig,
   ViewType,
+  WhatsAppMessage,
 } from '../types';
 import {
   exportMarksTemplateCSV,
@@ -24,9 +42,16 @@ import {
   parseMarksCSV,
   ParsedCSVResult,
   rankAllStudents,
+  sanitizeMarkInput,
 } from '../utils/grading';
 
+export interface SaveStatus {
+  state: 'saved' | 'saving' | 'offline';
+  lastSavedAt: string;
+}
+
 interface GradingContextType {
+  // Navigation & Hash Routing
   activeView: ViewType;
   setActiveView: (view: ViewType) => void;
   selectedStudentId: string;
@@ -35,23 +60,66 @@ interface GradingContextType {
   setActiveStream: (stream: string) => void;
   activeExam: string;
   setActiveExam: (exam: string) => void;
+  activeSubTab?: string;
+  setActiveSubTab: (tab: string) => void;
+
+  // Save / Sync Status
+  saveStatus: SaveStatus;
+  forceSave: () => void;
+
+  // Core Data
   schoolConfig: SchoolConfig;
   updateSchoolConfig: (config: Partial<SchoolConfig>) => void;
   students: Student[];
   subjects: Subject[];
+  streams: ClassStream[];
+  exams: ExamPeriod[];
+  terms: TermConfig[];
   marks: Record<string, Record<string, MarkValue>>;
-  updateMark: (studentId: string, subjectCode: string, value: MarkValue) => void;
-  batchUpdateMarks: (updates: Array<{ studentId: string; subjectCode: string; value: MarkValue }>) => void;
+
+  // Mark Operations
+  updateMark: (studentId: string, subjectCode: string, value: any) => void;
+  batchUpdateMarks: (updates: Array<{ studentId: string; subjectCode: string; value: any }>) => void;
   importMarksFromCSV: (csvContent: string) => ParsedCSVResult;
   downloadMarksTemplateCSV: () => void;
-  addStudent: (student: Omit<Student, 'id'>) => void;
+
+  // Student Operations
+  addStudent: (student: Omit<Student, 'id'>) => Student;
   updateStudent: (student: Student) => void;
   removeStudent: (studentId: string) => void;
-  resetToDemoData: () => void;
+  bulkAddStudents: (newStudents: Array<Omit<Student, 'id'>>) => { added: number; skipped: number };
+
+  // Subject Operations
+  addSubject: (subject: Omit<Subject, 'id'>) => Subject;
+  updateSubject: (subject: Subject) => void;
+  removeSubject: (subjectCode: string) => void;
+
+  // Stream & Exam Operations
+  addClassStream: (stream: Omit<ClassStream, 'id'>) => ClassStream;
+  updateClassStream: (stream: ClassStream) => void;
+  removeClassStream: (streamId: string) => void;
+
+  addExamPeriod: (exam: Omit<ExamPeriod, 'id'>) => ExamPeriod;
+  updateExamPeriod: (exam: ExamPeriod) => void;
+  removeExamPeriod: (examId: string) => void;
+
+  // Backup & Restore
+  resetToDemoData: () => Promise<void>;
   exportJSONBackup: () => void;
   restoreJSONBackup: (jsonString: string) => boolean;
 
-  // Computed data
+  // Teacher Profile & WhatsApp Communication
+  teacherProfile: TeacherProfile;
+  updateTeacherProfile: (profile: Partial<TeacherProfile>) => void;
+  whatsAppMessages: WhatsAppMessage[];
+  sendWhatsAppMessage: (msg: Omit<WhatsAppMessage, 'id' | 'timestamp' | 'status'>) => void;
+
+  // Progressive Web App (PWA) Install
+  canInstallPwa: boolean;
+  installPwa: () => Promise<void>;
+
+  // Computed Derived Selectors
+  filteredStudents: Student[];
   rankings: StudentCalculation[];
   classAverage: number;
   passRate: number;
@@ -66,90 +134,288 @@ interface GradingContextType {
 
 const GradingContext = createContext<GradingContextType | undefined>(undefined);
 
-const LOCAL_STORAGE_KEY = 'chokur_system_ledger_v2';
+// Hash route parser
+const parseHashRoute = (): { view: ViewType; studentId?: string; subTab?: string } => {
+  if (typeof window === 'undefined') return { view: 'overview' };
+  const hash = window.location.hash.replace(/^#\/?/, '');
+  if (!hash) return { view: 'overview' };
+
+  const [routePart, queryPart] = hash.split('?');
+  const validViews: ViewType[] = [
+    'overview',
+    'marks-entry',
+    'rankings',
+    'subject-analysis',
+    'grade-distribution',
+    'report-cards',
+    'students',
+    'profile',
+    'settings',
+  ];
+
+  const view = validViews.includes(routePart as ViewType) ? (routePart as ViewType) : 'overview';
+  let studentId: string | undefined;
+  let subTab: string | undefined;
+
+  if (queryPart) {
+    const params = new URLSearchParams(queryPart);
+    if (params.get('student')) studentId = params.get('student')!;
+    if (params.get('tab')) subTab = params.get('tab')!;
+  }
+
+  return { view, studentId, subTab };
+};
 
 export const GradingProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [activeView, setActiveView] = useState<ViewType>('overview');
-  const [selectedStudentId, setSelectedStudentId] = useState<string>('s-1');
-  const [activeStream, setActiveStream] = useState<string>('Form 4 East');
-  const [activeExam, setActiveExam] = useState<string>('End-term Exam, Term 2 2026');
+  // Synchronous initial load from local repository cache
+  const initialData = useMemo(() => loadSynchronousStorageState(), []);
 
-  // Load state from localStorage or initialize with seed data
-  const [schoolConfig, setSchoolConfig] = useState<SchoolConfig>(() => {
-    try {
-      const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_config`);
-      return saved ? JSON.parse(saved) : INITIAL_SCHOOL_CONFIG;
-    } catch {
-      return INITIAL_SCHOOL_CONFIG;
-    }
-  });
+  const [schoolConfig, setSchoolConfig] = useState<SchoolConfig>(initialData.schoolConfig);
+  const [teacherProfile, setTeacherProfile] = useState<TeacherProfile>(
+    initialData.teacherProfile || INITIAL_TEACHER_PROFILE
+  );
+  const [whatsAppMessages, setWhatsAppMessages] = useState<WhatsAppMessage[]>(
+    initialData.whatsAppMessages || INITIAL_WHATSAPP_MESSAGES
+  );
+  const [students, setStudents] = useState<Student[]>(initialData.students);
+  const [subjects, setSubjects] = useState<Subject[]>(initialData.subjects);
+  const [streams, setStreams] = useState<ClassStream[]>(initialData.streams);
+  const [exams, setExams] = useState<ExamPeriod[]>(initialData.exams);
+  const [terms, setTerms] = useState<TermConfig[]>(initialData.terms);
+  const [marks, setMarks] = useState<Record<string, Record<string, MarkValue>>>(initialData.marks);
 
-  const [students, setStudents] = useState<Student[]>(() => {
-    try {
-      const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_students`);
-      return saved ? JSON.parse(saved) : INITIAL_STUDENTS;
-    } catch {
-      return INITIAL_STUDENTS;
-    }
-  });
-
-  const [subjects, setSubjects] = useState<Subject[]>(() => {
-    try {
-      const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_subjects`);
-      return saved ? JSON.parse(saved) : INITIAL_SUBJECTS;
-    } catch {
-      return INITIAL_SUBJECTS;
-    }
-  });
-
-  const [marks, setMarks] = useState<Record<string, Record<string, MarkValue>>>(() => {
-    try {
-      const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_marks`);
-      return saved ? JSON.parse(saved) : INITIAL_MARKS;
-    } catch {
-      return INITIAL_MARKS;
-    }
-  });
-
-  // Save changes to localStorage
-  useEffect(() => {
-    localStorage.setItem(`${LOCAL_STORAGE_KEY}_config`, JSON.stringify(schoolConfig));
-  }, [schoolConfig]);
+  // PWA Install Prompt State
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [canInstallPwa, setCanInstallPwa] = useState(false);
 
   useEffect(() => {
-    localStorage.setItem(`${LOCAL_STORAGE_KEY}_students`, JSON.stringify(students));
-  }, [students]);
+    const handler = (e: Event) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+      setCanInstallPwa(true);
+    };
+    window.addEventListener('beforeinstallprompt', handler);
+    return () => window.removeEventListener('beforeinstallprompt', handler);
+  }, []);
 
+  const installPwa = async () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      const choice = await deferredPrompt.userChoice;
+      if (choice && choice.outcome === 'accepted') {
+        setCanInstallPwa(false);
+        setDeferredPrompt(null);
+      }
+    }
+  };
+
+  const initialRoute = useMemo(() => parseHashRoute(), []);
+  const [activeView, setActiveViewInternal] = useState<ViewType>(
+    initialRoute.view || initialData.uiState.activeView || 'overview'
+  );
+  const [selectedStudentId, setSelectedStudentIdInternal] = useState<string>(
+    initialRoute.studentId || initialData.uiState.selectedStudentId || 's-1'
+  );
+  const [activeSubTab, setActiveSubTabInternal] = useState<string>(
+    initialRoute.subTab || 'students'
+  );
+  const [activeStream, setActiveStream] = useState<string>(
+    initialData.uiState.activeStream || 'Form 4 East'
+  );
+  const [activeExam, setActiveExam] = useState<string>(
+    initialData.uiState.activeExam || 'End-term Exam, Term 2 2026'
+  );
+
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>({
+    state: 'saved',
+    lastSavedAt: new Date().toLocaleTimeString(),
+  });
+
+  const isInitialMount = useRef(true);
+
+  // Sync IndexedDB on mount to reconcile any database changes
   useEffect(() => {
-    localStorage.setItem(`${LOCAL_STORAGE_KEY}_subjects`, JSON.stringify(subjects));
-  }, [subjects]);
+    let isMounted = true;
+    retrieveAppState().then((stored) => {
+      if (!isMounted || !stored) return;
+      // Reconcile if stored state is valid
+      if (stored.students && stored.students.length > 0) {
+        setStudents(stored.students);
+      }
+      if (stored.subjects && stored.subjects.length > 0) {
+        setSubjects(stored.subjects);
+      }
+      if (stored.streams && stored.streams.length > 0) {
+        setStreams(stored.streams);
+      }
+      if (stored.exams && stored.exams.length > 0) {
+        setExams(stored.exams);
+      }
+      if (stored.marks) {
+        setMarks(stored.marks);
+      }
+      if (stored.schoolConfig) {
+        setSchoolConfig(stored.schoolConfig);
+      }
+      if (stored.teacherProfile) {
+        setTeacherProfile(stored.teacherProfile);
+      }
+      if (stored.whatsAppMessages && stored.whatsAppMessages.length > 0) {
+        setWhatsAppMessages(stored.whatsAppMessages);
+      }
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
+  // Update URL hash when view, studentId, or subTab change
+  const setActiveView = (view: ViewType) => {
+    setActiveViewInternal(view);
+    updateHash(view, selectedStudentId, activeSubTab);
+  };
+
+  const setSelectedStudentId = (id: string) => {
+    setSelectedStudentIdInternal(id);
+    updateHash(activeView, id, activeSubTab);
+  };
+
+  const setActiveSubTab = (tab: string) => {
+    setActiveSubTabInternal(tab);
+    updateHash(activeView, selectedStudentId, tab);
+  };
+
+  const updateHash = (view: ViewType, studentId: string, subTab?: string) => {
+    let hash = `#${view}`;
+    const params = new URLSearchParams();
+    if (view === 'report-cards' && studentId) {
+      params.set('student', studentId);
+    }
+    if (view === 'students' && subTab) {
+      params.set('tab', subTab);
+    }
+    const queryString = params.toString();
+    if (queryString) {
+      hash += `?${queryString}`;
+    }
+    if (window.location.hash !== hash) {
+      window.history.replaceState(null, '', hash);
+    }
+  };
+
+  // Listen to browser navigation (Back / Forward / direct URL hash change)
   useEffect(() => {
-    localStorage.setItem(`${LOCAL_STORAGE_KEY}_marks`, JSON.stringify(marks));
-  }, [marks]);
+    const handleHashChange = () => {
+      const { view, studentId, subTab } = parseHashRoute();
+      setActiveViewInternal(view);
+      if (studentId) setSelectedStudentIdInternal(studentId);
+      if (subTab) setActiveSubTabInternal(subTab);
+    };
 
-  // Mutations
-  const updateMark = (studentId: string, subjectCode: string, value: MarkValue) => {
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, []);
+
+  // Central persistence effect whenever state changes
+  useEffect(() => {
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
+    }
+
+    setSaveStatus((prev) => ({ ...prev, state: 'saving' }));
+
+    const payload: AppStateData = {
+      version: 2,
+      updatedAt: new Date().toISOString(),
+      schoolConfig,
+      teacherProfile,
+      whatsAppMessages,
+      students,
+      subjects,
+      streams,
+      exams,
+      terms,
+      marks,
+      uiState: {
+        activeStream,
+        activeExam,
+        activeView,
+        selectedStudentId,
+      },
+    };
+
+    const timer = setTimeout(async () => {
+      try {
+        await persistAppState(payload);
+        setSaveStatus({
+          state: 'saved',
+          lastSavedAt: new Date().toLocaleTimeString(),
+        });
+      } catch (err) {
+        console.warn('[Chokur] Persistence error, saved to localStorage fallback:', err);
+        setSaveStatus({
+          state: 'offline',
+          lastSavedAt: new Date().toLocaleTimeString(),
+        });
+      }
+    }, 200);
+
+    return () => clearTimeout(timer);
+  }, [schoolConfig, students, subjects, streams, exams, terms, marks, activeStream, activeExam, activeView, selectedStudentId]);
+
+  const forceSave = () => {
+    const payload: AppStateData = {
+      version: 2,
+      updatedAt: new Date().toISOString(),
+      schoolConfig,
+      teacherProfile,
+      whatsAppMessages,
+      students,
+      subjects,
+      streams,
+      exams,
+      terms,
+      marks,
+      uiState: {
+        activeStream,
+        activeExam,
+        activeView,
+        selectedStudentId,
+      },
+    };
+    persistAppState(payload).then(() => {
+      setSaveStatus({
+        state: 'saved',
+        lastSavedAt: new Date().toLocaleTimeString(),
+      });
+    });
+  };
+
+  // Mark Mutations
+  const updateMark = (studentId: string, subjectCode: string, rawVal: any) => {
+    const sanitized = sanitizeMarkInput(rawVal);
     setMarks((prev) => {
-      const studentMarks = prev[studentId] ? { ...prev[studentId] } : {};
-      studentMarks[subjectCode] = value;
+      const studentMap = prev[studentId] ? { ...prev[studentId] } : {};
+      studentMap[subjectCode] = sanitized;
       return {
         ...prev,
-        [studentId]: studentMarks,
+        [studentId]: studentMap,
       };
     });
   };
 
-  const batchUpdateMarks = (updates: Array<{ studentId: string; subjectCode: string; value: MarkValue }>) => {
+  const batchUpdateMarks = (updates: Array<{ studentId: string; subjectCode: string; value: any }>) => {
     setMarks((prev) => {
       const next = { ...prev };
       updates.forEach(({ studentId, subjectCode, value }) => {
+        const sanitized = sanitizeMarkInput(value);
         if (!next[studentId]) {
           next[studentId] = {};
         } else {
           next[studentId] = { ...next[studentId] };
         }
-        next[studentId][subjectCode] = value;
+        next[studentId][subjectCode] = sanitized;
       });
       return next;
     });
@@ -180,15 +446,16 @@ export const GradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     );
   };
 
-  const addStudent = (studentData: Omit<Student, 'id'>) => {
-    const newId = `s-${Date.now()}`;
+  // Student Mutations
+  const addStudent = (studentData: Omit<Student, 'id'>): Student => {
+    const newId = `s-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     const newStudent: Student = { ...studentData, id: newId };
     setStudents((prev) => [newStudent, ...prev]);
-    // Initialize empty marks
     setMarks((prev) => ({
       ...prev,
       [newId]: {},
     }));
+    return newStudent;
   };
 
   const updateStudent = (updatedStudent: Student) => {
@@ -204,26 +471,211 @@ export const GradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     });
   };
 
+  const bulkAddStudents = (newStudentsData: Array<Omit<Student, 'id'>>): { added: number; skipped: number } => {
+    let addedCount = 0;
+    let skippedCount = 0;
+    const existingAdmNos = new Set(students.map((s) => s.admNo.trim().toLowerCase()));
+
+    const validNewStudents: Student[] = [];
+    const newMarksMap: Record<string, Record<string, MarkValue>> = {};
+
+    newStudentsData.forEach((item, idx) => {
+      const normalizedAdm = item.admNo.trim().toLowerCase();
+      if (!normalizedAdm || existingAdmNos.has(normalizedAdm)) {
+        skippedCount++;
+        return;
+      }
+      existingAdmNos.add(normalizedAdm);
+      const newId = `s-${Date.now()}-${idx}-${Math.floor(Math.random() * 1000)}`;
+      validNewStudents.push({
+        ...item,
+        id: newId,
+        admNo: item.admNo.trim(),
+        name: item.name.trim(),
+      });
+      newMarksMap[newId] = {};
+      addedCount++;
+    });
+
+    if (validNewStudents.length > 0) {
+      setStudents((prev) => [...validNewStudents, ...prev]);
+      setMarks((prev) => ({ ...prev, ...newMarksMap }));
+    }
+
+    return { added: addedCount, skipped: skippedCount };
+  };
+
+  // Subject Mutations
+  const addSubject = (subjData: Omit<Subject, 'id'>): Subject => {
+    const newId = `sub-${subjData.code.toLowerCase().trim()}`;
+    const newSubj: Subject = { ...subjData, id: newId, code: subjData.code.toUpperCase().trim() };
+    setSubjects((prev) => [...prev, newSubj]);
+    return newSubj;
+  };
+
+  const updateSubject = (updatedSubj: Subject) => {
+    setSubjects((prev) => prev.map((s) => (s.id === updatedSubj.id ? updatedSubj : s)));
+  };
+
+  const removeSubject = (subjectCode: string) => {
+    setSubjects((prev) => prev.filter((s) => s.code !== subjectCode));
+    // Cascade remove marks for this subject
+    setMarks((prev) => {
+      const next: Record<string, Record<string, MarkValue>> = {};
+      Object.entries(prev).forEach(([studentId, marksMap]) => {
+        const copy = { ...marksMap };
+        delete copy[subjectCode];
+        next[studentId] = copy;
+      });
+      return next;
+    });
+  };
+
+  // Class Stream Mutations
+  const addClassStream = (streamData: Omit<ClassStream, 'id'>): ClassStream => {
+    const newId = `str-${Date.now()}`;
+    const newStream: ClassStream = { ...streamData, id: newId };
+    setStreams((prev) => [...prev, newStream]);
+    return newStream;
+  };
+
+  const updateClassStream = (updatedStream: ClassStream) => {
+    const oldStream = streams.find((s) => s.id === updatedStream.id);
+    setStreams((prev) => prev.map((s) => (s.id === updatedStream.id ? updatedStream : s)));
+
+    // Cascade update student stream names if name changed
+    if (oldStream && oldStream.name !== updatedStream.name) {
+      setStudents((prev) =>
+        prev.map((s) => (s.stream === oldStream.name ? { ...s, stream: updatedStream.name } : s))
+      );
+      if (activeStream === oldStream.name) {
+        setActiveStream(updatedStream.name);
+      }
+    }
+  };
+
+  const removeClassStream = (streamId: string) => {
+    const streamToRemove = streams.find((s) => s.id === streamId);
+    if (!streamToRemove) return;
+
+    setStreams((prev) => prev.filter((s) => s.id !== streamId));
+    // Cascade remove all students in this stream
+    const studentIdsToRemove = new Set(
+      students.filter((s) => s.stream === streamToRemove.name).map((s) => s.id)
+    );
+    setStudents((prev) => prev.filter((s) => !studentIdsToRemove.has(s.id)));
+    setMarks((prev) => {
+      const next = { ...prev };
+      studentIdsToRemove.forEach((id) => delete next[id]);
+      return next;
+    });
+
+    if (activeStream === streamToRemove.name) {
+      const remaining = streams.filter((s) => s.id !== streamId);
+      if (remaining.length > 0) {
+        setActiveStream(remaining[0].name);
+      }
+    }
+  };
+
+  // Exam Period Mutations
+  const addExamPeriod = (examData: Omit<ExamPeriod, 'id'>): ExamPeriod => {
+    const newId = `exam-${Date.now()}`;
+    const newExam: ExamPeriod = { ...examData, id: newId };
+    setExams((prev) => [newExam, ...prev]);
+    return newExam;
+  };
+
+  const updateExamPeriod = (updatedExam: ExamPeriod) => {
+    setExams((prev) => prev.map((e) => (e.id === updatedExam.id ? updatedExam : e)));
+  };
+
+  const removeExamPeriod = (examId: string) => {
+    setExams((prev) => prev.filter((e) => e.id !== examId));
+  };
+
+  // School Config Mutations
   const updateSchoolConfig = (newConfig: Partial<SchoolConfig>) => {
     setSchoolConfig((prev) => ({ ...prev, ...newConfig }));
   };
 
-  const resetToDemoData = () => {
-    setSchoolConfig(INITIAL_SCHOOL_CONFIG);
-    setStudents(INITIAL_STUDENTS);
-    setSubjects(INITIAL_SUBJECTS);
-    setMarks(INITIAL_MARKS);
+  // Teacher Profile Mutations
+  const updateTeacherProfile = (profile: Partial<TeacherProfile>) => {
+    setTeacherProfile((prev) => ({ ...prev, ...profile }));
+  };
+
+  const sendWhatsAppMessage = (msg: Omit<WhatsAppMessage, 'id' | 'timestamp' | 'status'>) => {
+    const newMsg: WhatsAppMessage = {
+      ...msg,
+      id: `msg-${Date.now()}`,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      status: 'delivered',
+    };
+    setWhatsAppMessages((prev) => [...prev, newMsg]);
+
+    if (msg.sender === 'teacher') {
+      setTimeout(() => {
+        setWhatsAppMessages((prev) =>
+          prev.map((m) => (m.id === newMsg.id ? { ...m, status: 'read' } : m))
+        );
+      }, 1200);
+
+      setTimeout(() => {
+        const reply: WhatsAppMessage = {
+          id: `msg-${Date.now() + 1}`,
+          studentId: msg.studentId,
+          studentAdm: msg.studentAdm,
+          studentName: msg.studentName,
+          parentName: msg.parentName,
+          parentPhone: msg.parentPhone,
+          sender: 'parent',
+          text: `Thank you Mwalimu! Received the report for ${msg.studentName}. We appreciate your dedication.`,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          status: 'read',
+        };
+        setWhatsAppMessages((prev) => [...prev, reply]);
+      }, 2500);
+    }
+  };
+
+  // Reset to seed demo data
+  const resetToDemoData = async () => {
+    const clean = await resetDatabaseToDefaults();
+    setSchoolConfig(clean.schoolConfig);
+    setTeacherProfile(clean.teacherProfile);
+    setWhatsAppMessages(clean.whatsAppMessages);
+    setStudents(clean.students);
+    setSubjects(clean.subjects);
+    setStreams(clean.streams);
+    setExams(clean.exams);
+    setTerms(clean.terms);
+    setMarks(clean.marks);
+    setActiveStream(clean.uiState.activeStream);
+    setActiveExam(clean.uiState.activeExam);
+    setActiveView('overview');
     setSelectedStudentId('s-1');
   };
 
+  // Export & Restore JSON
   const exportJSONBackup = () => {
-    const backupData = {
-      version: '2.4.1',
-      date: new Date().toISOString(),
+    const backupData: AppStateData = {
+      version: 2,
+      updatedAt: new Date().toISOString(),
       schoolConfig,
+      teacherProfile,
+      whatsAppMessages,
       students,
       subjects,
+      streams,
+      exams,
+      terms,
       marks,
+      uiState: {
+        activeStream,
+        activeExam,
+        activeView,
+        selectedStudentId,
+      },
     };
     const jsonString = `data:text/json;charset=utf-8,${encodeURIComponent(JSON.stringify(backupData, null, 2))}`;
     const downloadAnchor = document.createElement('a');
@@ -237,11 +689,20 @@ export const GradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const restoreJSONBackup = (jsonString: string): boolean => {
     try {
       const data = JSON.parse(jsonString);
-      if (data.students && data.subjects && data.marks) {
+      if (data.students && Array.isArray(data.students) && data.subjects && data.marks) {
         if (data.schoolConfig) setSchoolConfig(data.schoolConfig);
+        if (data.teacherProfile) setTeacherProfile(data.teacherProfile);
+        if (Array.isArray(data.whatsAppMessages)) setWhatsAppMessages(data.whatsAppMessages);
         setStudents(data.students);
         setSubjects(data.subjects);
+        if (Array.isArray(data.streams)) setStreams(data.streams);
+        if (Array.isArray(data.exams)) setExams(data.exams);
+        if (Array.isArray(data.terms)) setTerms(data.terms);
         setMarks(data.marks);
+        if (data.uiState) {
+          if (data.uiState.activeStream) setActiveStream(data.uiState.activeStream);
+          if (data.uiState.activeExam) setActiveExam(data.uiState.activeExam);
+        }
         return true;
       }
       return false;
@@ -255,12 +716,11 @@ export const GradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return students.filter((s) => s.stream === activeStream && s.status === 'Active');
   }, [students, activeStream]);
 
-  // Compute rankings
+  // Compute live rankings according to pure KNEC algorithms
   const rankings = useMemo(() => {
     return rankAllStudents(filteredStudents, marks, subjects, schoolConfig.calculationMethod);
   }, [filteredStudents, marks, subjects, schoolConfig.calculationMethod]);
 
-  // Class aggregates
   const studentsRanked = rankings.length;
 
   const classAverage = useMemo(() => {
@@ -326,12 +786,12 @@ export const GradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return { name: bottom.subject.name, average: bottom.average };
   }, [subjectDepartmentalStats]);
 
-  // Students near the C+ boundary (mean points between 5.8 and 6.8 or within 1 pt of 7.0)
+  // Students near the C+ boundary (mean points between 5.8 and 6.8)
   const nearTheLineStudents = useMemo(() => {
     return rankings.filter((r) => r.meanPoints >= 5.8 && r.meanPoints <= 6.8);
   }, [rankings]);
 
-  // Grade Distribution (12 tiers)
+  // Grade Distribution across 12 KCSE tiers
   const gradeDistributionTiers = useMemo<GradeDistributionTier[]>(() => {
     const totalCount = rankings.length || 1;
     let cumulative = 0;
@@ -362,10 +822,17 @@ export const GradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
         setActiveStream,
         activeExam,
         setActiveExam,
+        activeSubTab,
+        setActiveSubTab,
+        saveStatus,
+        forceSave,
         schoolConfig,
         updateSchoolConfig,
         students,
         subjects,
+        streams,
+        exams,
+        terms,
         marks,
         updateMark,
         batchUpdateMarks,
@@ -374,9 +841,20 @@ export const GradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
         addStudent,
         updateStudent,
         removeStudent,
+        bulkAddStudents,
+        addSubject,
+        updateSubject,
+        removeSubject,
+        addClassStream,
+        updateClassStream,
+        removeClassStream,
+        addExamPeriod,
+        updateExamPeriod,
+        removeExamPeriod,
         resetToDemoData,
         exportJSONBackup,
         restoreJSONBackup,
+        filteredStudents,
         rankings,
         classAverage,
         passRate,
@@ -387,6 +865,12 @@ export const GradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
         nearTheLineStudents,
         strongestSubject,
         weakestSubject,
+        teacherProfile,
+        updateTeacherProfile,
+        whatsAppMessages,
+        sendWhatsAppMessage,
+        canInstallPwa,
+        installPwa,
       }}
     >
       {children}
